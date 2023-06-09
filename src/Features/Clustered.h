@@ -2,9 +2,6 @@
 #include <DirectXMath.h>
 #include <d3d11.h>
 
-#include "RE/BSGraphics.h"
-#include "RE/BSGraphicsTypes.h"
-
 #include "Buffer.h"
 #include <shared_mutex>
 

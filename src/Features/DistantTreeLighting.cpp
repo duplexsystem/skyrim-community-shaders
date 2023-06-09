@@ -144,7 +144,7 @@ void DistantTreeLighting::ModifyDistantTree(const RE::BSShader*, const uint32_t 
 
 		auto renderer = RE::BSGraphics::Renderer::GetSingleton();
 		ID3D11ShaderResourceView* views[1]{};
-		views[0] = renderer->GetRuntimeData().renderTargets[RENDER_TARGET_SHADOW_MASK].SRV;
+		views[0] = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kSHADOW_MASK].SRV;
 		context->PSSetShaderResources(17, ARRAYSIZE(views), views);
 	}
 }

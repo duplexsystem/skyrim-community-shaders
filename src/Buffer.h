@@ -7,10 +7,6 @@
 #include <wrl\client.h>
 #include <wrl\wrappers\corewrappers.h>
 
-#include "RE/BSGraphics.h"
-#include "RE/BSGraphicsTypes.h"
-#include "RE/R/Renderer.h"
-
 template <typename T>
 D3D11_BUFFER_DESC StructuredBufferDesc(uint64_t count, bool uav = true, bool dynamic = false)
 {
