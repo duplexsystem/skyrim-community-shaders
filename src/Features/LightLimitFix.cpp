@@ -574,6 +574,9 @@ void LightLimitFix::UpdateLights()
 {
 	auto accumulator = RE::BSGraphics::BSShaderAccumulator::GetCurrentAccumulator();
 
+	if (!accumulator->kCamera)
+		return;
+
 	lightsNear = std::max(0.0f, accumulator->kCamera->GetRuntimeData2().viewFrustum.fNear);
 	lightsFar = std::min(16384.0f, accumulator->kCamera->GetRuntimeData2().viewFrustum.fFar);
 
