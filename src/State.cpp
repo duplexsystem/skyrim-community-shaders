@@ -34,7 +34,7 @@ void State::Draw()
 		}
 	}
 
-	currentShader = nullptr;
+	//currentShader = nullptr;
 }
 
 void State::Reset()
