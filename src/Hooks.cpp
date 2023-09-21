@@ -8,6 +8,9 @@
 
 #include "ShaderTools/BSShaderHooks.h"
 
+#include "Features/TerrainBlending.h"
+
+
 std::unordered_map<void*, std::pair<std::unique_ptr<uint8_t[]>, size_t>> ShaderBytecodeMap;
 
 void RegisterShaderBytecode(void* Shader, const void* Bytecode, size_t BytecodeLength)
@@ -132,6 +135,11 @@ decltype(&hk_BSGraphics_SetDirtyStates) ptr_BSGraphics_SetDirtyStates;
 
 void hk_BSGraphics_SetDirtyStates(bool isCompute)
 {
+	//auto context = RE::BSGraphics::Renderer::GetSingleton()->GetRuntimeData().context;
+	//if (TerrainBlending::GetSingleton()->depthStencilStateBackup) {
+	//	context->OMSetDepthStencilState(TerrainBlending::GetSingleton()->depthStencilStateBackup, TerrainBlending::GetSingleton()->stencilRefBackup);
+	//	TerrainBlending::GetSingleton()->depthStencilStateBackup = nullptr;
+	//}
 	(ptr_BSGraphics_SetDirtyStates)(isCompute);
 	State::GetSingleton()->Draw();
 }
@@ -157,6 +165,19 @@ HRESULT STDMETHODCALLTYPE hk_CreatePixelShader(ID3D11Device* This, const void* p
 		RegisterShaderBytecode(*ppPixelShader, pShaderBytecode, BytecodeLength);
 
 	return hr;
+}
+
+decltype(&ID3D11DeviceContext::DrawIndexed) ptrDrawIndexed;
+
+void hk_DrawIndexed(
+	ID3D11DeviceContext* This,
+ UINT IndexCount,
+ UINT StartIndexLocation,
+ INT  BaseVertexLocation)
+{
+	if (State::GetSingleton()->currentShader)
+		TerrainBlending::GetSingleton()->Draw(State::GetSingleton()->currentShader, State::GetSingleton()->currentPixelDescriptor);
+	(This->*ptrDrawIndexed)(IndexCount, StartIndexLocation, BaseVertexLocation);
 }
 
 namespace Hooks
@@ -186,6 +207,8 @@ namespace Hooks
 				*(uintptr_t*)&ptrCreateVertexShader = Detours::X64::DetourClassVTable(*(uintptr_t*)device, &hk_CreateVertexShader, 12);
 				*(uintptr_t*)&ptrCreatePixelShader = Detours::X64::DetourClassVTable(*(uintptr_t*)device, &hk_CreatePixelShader, 15);
 			}
+			*(uintptr_t*)&ptrDrawIndexed = Detours::X64::DetourClassVTable(*(uintptr_t*)context, &hk_DrawIndexed, 12);
+
 			State::GetSingleton()->Setup();
 			Menu::GetSingleton()->Init(swapchain, device, context);
 		}

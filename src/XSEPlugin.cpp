@@ -8,6 +8,8 @@
 #include "Features/ExtendedMaterials.h"
 #include "Features/LightLimitFIx/ParticleLights.h"
 #include "Features/LightLimitFix.h"
+#include "Features/TerrainBlending.h"
+
 #define DLLEXPORT __declspec(dllexport)
 
 std::list<std::string> errors;
@@ -106,6 +108,10 @@ void MessageHandler(SKSE::MessagingInterface::Message* message)
 				if (LightLimitFix::GetSingleton()->loaded) {
 					ParticleLights::GetSingleton()->GetConfigs();
 					LightLimitFix::InstallHooks();
+				}
+
+				if (TerrainBlending::GetSingleton()->loaded) {
+					TerrainBlending::InstallHooks();
 				}
 			}
 
