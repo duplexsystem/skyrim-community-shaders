@@ -104,10 +104,6 @@ enum class LightingShaderTechniques
 	Outline = 20,
 };
 
-uint32_t GetTechnique(uint32_t descriptor)
-{
-	return 0x3F & (descriptor >> 24);
-}
 
 void ScreenSpaceShadows::ClearComputeShader()
 {
