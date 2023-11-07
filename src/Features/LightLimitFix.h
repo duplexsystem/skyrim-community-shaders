@@ -235,10 +235,11 @@ public:
 
 		struct AIProcess_CalculateLightValue_GetLuminance
 		{
-			static void thunk(RE::ShadowSceneNode* shadowSceneNode, RE::NiPoint3& targetPosition, int& numHits, float& sunLightLevel, float& lightLevel, RE::NiLight& refLight, int32_t shadowBitMask)
+			static float thunk(RE::ShadowSceneNode* shadowSceneNode, RE::NiPoint3& targetPosition, int& numHits, float& sunLightLevel, float& lightLevel, RE::NiLight& refLight, int32_t shadowBitMask)
 			{
-				func(shadowSceneNode, targetPosition, numHits, sunLightLevel, lightLevel, refLight, shadowBitMask);
-				GetSingleton()->AddParticleLightLuminance(targetPosition, numHits, lightLevel);
+				auto ret = func(shadowSceneNode, targetPosition, numHits, sunLightLevel, lightLevel, refLight, shadowBitMask);
+				GetSingleton()->AddParticleLightLuminance(targetPosition, numHits, ret);
+				return ret;
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
