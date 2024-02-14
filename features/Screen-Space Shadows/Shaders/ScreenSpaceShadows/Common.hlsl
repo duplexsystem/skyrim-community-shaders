@@ -17,6 +17,7 @@ cbuffer PerFrame : register(b0)
 	float NearHardness;
 	float BlurRadius;
 	float BlurDropoff;
+	bool Enabled;
 };
 RWTexture2D<float> OcclusionRW : register(u0);
 
