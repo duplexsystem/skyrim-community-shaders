@@ -4,6 +4,8 @@
   "description": "",
   "license": "GPL-3.0",
   "dependencies": [
+    "directxmath",
+    "directxtk",
     "bshoshany-thread-pool",
     "cppwinrt",
     "fmt",

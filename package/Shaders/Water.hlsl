@@ -10,18 +10,18 @@ struct VS_INPUT
 	float4 Position : POSITION0;
 #	if defined(NORMAL_TEXCOORD)
 	float2 TexCoord0 : TEXCOORD0;
-#	endif
+#	endif  // NORMAL_TEXCOORD
 #	if defined(VC)
 	float4 Color : COLOR0;
-#	endif
-#endif
+#	endif  // VC
+#endif      // defined(SPECULAR) || defined(UNDERWATER) || defined(STENCIL) || defined(SIMPLE)
 
 #if defined(LOD)
 	float4 Position : POSITION0;
 #	if defined(VC)
 	float4 Color : COLOR0;
-#	endif
-#endif
+#	endif  // VC
+#endif      // LOD
 };
 
 struct VS_OUTPUT
@@ -34,14 +34,14 @@ struct VS_OUTPUT
 	float4 TexCoord2 : TEXCOORD2;
 #	if defined(WADING) || (defined(FLOWMAP) && (defined(REFRACTIONS) || defined(BLEND_NORMALS))) || (defined(VERTEX_ALPHA_DEPTH) && defined(VC)) || ((defined(SPECULAR) && NUM_SPECULAR_LIGHTS == 0) && defined(FLOWMAP) /*!defined(NORMAL_TEXCOORD) && !defined(BLEND_NORMALS) && !defined(VC)*/)
 	float4 TexCoord3 : TEXCOORD3;
-#	endif
+#	endif  // defined(WADING) || (defined(FLOWMAP) && (defined(REFRACTIONS) || defined(BLEND_NORMALS))) || (defined(VERTEX_ALPHA_DEPTH) && defined(VC)) || ((defined(SPECULAR) && NUM_SPECULAR_LIGHTS == 0) && defined(FLOWMAP)
 #	if defined(FLOWMAP)
 	nointerpolation float TexCoord4 : TEXCOORD4;
-#	endif
+#	endif  // FLOWMAP
 #	if NUM_SPECULAR_LIGHTS == 0
 	float4 MPosition : TEXCOORD5;
-#	endif
-#endif
+#	endif  // NUM_SPECULAR_LIGHTS == 0
+#endif      // defined(SPECULAR) || defined(UNDERWATER)
 
 #if defined(SIMPLE)
 	float4 HPosition : SV_POSITION0;
@@ -50,20 +50,20 @@ struct VS_OUTPUT
 	float4 TexCoord1 : TEXCOORD1;
 	float4 TexCoord2 : TEXCOORD2;
 	float4 MPosition : TEXCOORD5;
-#endif
+#endif  // SIMPLE
 
 #if defined(LOD)
 	float4 HPosition : SV_POSITION0;
 	float4 FogParam : COLOR0;
 	float4 WPosition : TEXCOORD0;
 	float4 TexCoord1 : TEXCOORD1;
-#endif
+#endif  // LOD
 
 #if defined(STENCIL)
 	float4 HPosition : SV_POSITION0;
 	float4 WorldPosition : POSITION1;
 	float4 PreviousWorldPosition : POSITION2;
-#endif
+#endif  // STENCIL
 };
 
 #ifdef VSHADER
@@ -97,8 +97,8 @@ VS_OUTPUT main(VS_INPUT input)
 	VS_OUTPUT vsout;
 
 	float4 inputPosition = float4(input.Position.xyz, 1.0);
-	float4 worldPos = mul(World, inputPosition);
-	float4 worldViewPos = mul(WorldViewProj, inputPosition);
+	float4 worldPos = mul(World[eyeIndex], inputPosition);
+	float4 worldViewPos = mul(WorldViewProj[eyeIndex], inputPosition);
 
 	float heightMult = min((1.0 / 10000.0) * max(worldViewPos.z - 70000, 0), 1);
 
@@ -108,7 +108,7 @@ VS_OUTPUT main(VS_INPUT input)
 
 #	if defined(STENCIL)
 	vsout.WorldPosition = worldPos;
-	vsout.PreviousWorldPosition = mul(PreviousWorld, inputPosition);
+	vsout.PreviousWorldPosition = mul(PreviousWorld[eyeIndex], inputPosition);
 #	else
 	float fogColorParam = min(VSFogFarColor.w,
 		pow(saturate(length(worldViewPos.xyz) * VSFogParam.y - VSFogParam.x), NormalsScale.w));
@@ -126,7 +126,7 @@ VS_OUTPUT main(VS_INPUT input)
 #		else
 #			if !defined(SPECULAR) || (NUM_SPECULAR_LIGHTS == 0)
 	vsout.MPosition.xyzw = inputPosition.xyzw;
-#			endif
+#			endif  // !defined(SPECULAR) || (NUM_SPECULAR_LIGHTS == 0)
 
 	float2 posAdjust = worldPos.xy + QPosAdjust.xy;
 
@@ -148,8 +148,8 @@ VS_OUTPUT main(VS_INPUT input)
 		scrollAdjust2 = 0.0;
 		scrollAdjust3 = 0.0;
 	}
-#				endif
-#			endif
+#				endif  // NORMAL_TEXCOORD
+#			endif      // !(defined(FLOWMAP) && (defined(REFRACTIONS) || defined(BLEND_NORMALS) || defined(DEPTH) || NUM_SPECULAR_LIGHTS == 0))
 
 	vsout.TexCoord1 = 0.0;
 	vsout.TexCoord2 = 0.0;
@@ -163,8 +163,8 @@ VS_OUTPUT main(VS_INPUT input)
 	vsout.TexCoord1.xy = NormalsScroll0.xy + scrollAdjust1;
 	vsout.TexCoord1.zw = 0.0;
 	vsout.TexCoord2.xy = 0.0;
-#					endif
-#				endif
+#					endif  // BLEND_NORMALS
+#				endif      // !(((defined(SPECULAR) || NUM_SPECULAR_LIGHTS == 0) || (defined(UNDERWATER) && defined(REFRACTIONS))) && !defined(NORMAL_TEXCOORD))
 #				if !defined(NORMAL_TEXCOORD)
 	vsout.TexCoord3 = 0.0;
 #				elif defined(WADING)
@@ -176,7 +176,7 @@ VS_OUTPUT main(VS_INPUT input)
 	vsout.TexCoord2.zw = (CellTexCoordOffset.xy + input.TexCoord0.xy) / ObjectUV.xx;
 	vsout.TexCoord3.xy = (CellTexCoordOffset.zw + input.TexCoord0.xy);
 	vsout.TexCoord3.zw = input.TexCoord0.xy;
-#				endif
+#				endif  // NORMAL_TEXCOORD
 	vsout.TexCoord4 = ObjectUV.x;
 #			else
 	vsout.TexCoord1.xy = NormalsScroll0.xy + scrollAdjust1;
@@ -188,19 +188,19 @@ VS_OUTPUT main(VS_INPUT input)
 	vsout.TexCoord3 = 0.0;
 #					if (defined(NORMAL_TEXCOORD) && ((!defined(BLEND_NORMALS) && !defined(VERTEX_ALPHA_DEPTH)) || defined(WADING)))
 	vsout.TexCoord3.xy = input.TexCoord0;
-#					endif
+#					endif  // (defined(NORMAL_TEXCOORD) && ((!defined(BLEND_NORMALS) && !defined(VERTEX_ALPHA_DEPTH)) || defined(WADING)))
 #					if defined(VERTEX_ALPHA_DEPTH) && defined(VC)
 	vsout.TexCoord3.z = input.Color.w;
-#					endif
-#				endif
-#			endif
-#		endif
-#	endif
+#					endif  // defined(VERTEX_ALPHA_DEPTH) && defined(VC)
+#				endif      // (defined(WADING) || (defined(VERTEX_ALPHA_DEPTH) && defined(VC)))
+#			endif          // !(((defined(SPECULAR) || NUM_SPECULAR_LIGHTS == 0) || (defined(UNDERWATER) && defined(REFRACTIONS))) && !defined(NORMAL_TEXCOORD))
+#		endif              // FLOWMAP
+#	endif                  // LOD
 
 	return vsout;
 }
 
-#endif
+#endif  // STENCIL
 
 typedef VS_OUTPUT PS_INPUT;
 
@@ -292,7 +292,7 @@ float3 GetFlowmapNormal(PS_INPUT input, float2 uvShift, float multiplier, float 
 	float2 uv = offset + (rotatedFlowVector - float2(multiplier * ((0.001 * ReflectionColor.w) * flowmapColor.w), 0));
 	return float3(FlowMapNormalsTex.Sample(FlowMapNormalsSampler, uv).xy, flowmapColor.z);
 }
-#		endif
+#		endif  // FLOWMAP
 
 float3 GetWaterNormal(PS_INPUT input, float distanceFactor, float normalsDepthFactor)
 {
@@ -317,7 +317,7 @@ float3 GetWaterNormal(PS_INPUT input, float distanceFactor, float normalsDepthFa
 			0);
 	flowmapNormal.z =
 		sqrt(1 - flowmapNormal.x * flowmapNormal.x - flowmapNormal.y * flowmapNormal.y);
-#		endif
+#		endif  // FLOWMAP
 
 	float3 normals1 = Normals01Tex.Sample(Normals01Sampler, input.TexCoord1.xy).xyz * 2.0 +
 	                  float3(-1, -1, -2);
@@ -337,29 +337,29 @@ float3 GetWaterNormal(PS_INPUT input, float distanceFactor, float normalsDepthFa
 	float3 finalNormal = blendedNormal;
 #			else
 	float3 finalNormal = normalize(lerp(float3(0, 0, 1), blendedNormal, normalsDepthFactor));
-#			endif
+#			endif  // UNDERWATER
 
 #			if defined(FLOWMAP)
 	float normalBlendFactor =
 		normalMul.y * ((1 - normalMul.x) * flowmapNormal3.z + normalMul.x * flowmapNormal2.z) +
 		(1 - normalMul.y) * (normalMul.x * flowmapNormal1.z + (1 - normalMul.x) * flowmapNormal0.z);
 	finalNormal = normalize(lerp(normals1 + float3(0, 0, 1), normalize(lerp(finalNormal, flowmapNormal, normalBlendFactor)), distanceFactor));
-#			endif
+#			endif  // FLOWMAP
 #		else
 	float3 finalNormal =
 		normalize(float3(0, 0, 1) + NormalsAmplitude.xxx * normals1);
-#		endif
+#		endif  // defined (FLOWMAP) && !defined(BLEND_NORMALS)
 
 #		if defined(WADING)
 #			if defined(FLOWMAP)
 	float2 displacementUv = input.TexCoord3.zw;
 #			else
 	float2 displacementUv = input.TexCoord3.xy;
-#			endif
+#			endif  // FLOWMAP
 	float3 displacement = normalize(float3(NormalsAmplitude.w * (-0.5 + DisplacementTex.Sample(DisplacementSampler, displacementUv).zw),
 		0.04));
 	finalNormal = lerp(displacement, finalNormal, displacement.z);
-#		endif
+#		endif  // WADING
 
 	return finalNormal;
 }
@@ -409,7 +409,7 @@ float GetScreenDepthWater(float2 screenPosition)
 	float depth = DepthTex.Load(float3(screenPosition, 0)).x;
 	return (CameraData.w / (-depth * CameraData.z + CameraData.x));
 }
-#		endif
+#		endif  // DEPTH
 
 float3 GetLdotN(float3 normal)
 {
@@ -419,7 +419,7 @@ float3 GetLdotN(float3 normal)
 	if (shaderDescriptors[0].PixelShaderDescriptor & _Interior)
 		return 1;
 	return saturate(dot(SunDir.xyz, normal));
-#		endif
+#		endif  // defined(INTERIOR) || defined(UNDERWATER)
 }
 
 float GetFresnelValue(float3 normal, float3 viewDirection)
@@ -428,7 +428,7 @@ float GetFresnelValue(float3 normal, float3 viewDirection)
 	float3 actualNormal = -normal;
 #		else
 	float3 actualNormal = normal;
-#		endif
+#		endif  // UNDERWATER
 	float viewAngle = 1 - saturate(dot(-viewDirection, actualNormal));
 	return (1 - FresnelRI.x) * pow(viewAngle, 5) + FresnelRI.x;
 }
@@ -463,7 +463,7 @@ float3 GetWaterDiffuseColor(PS_INPUT input, float3 normal, float3 viewDirection,
 		refractionUvRaw =
 			DynamicResolutionParams2.xy * input.HPosition.xy * VPOSOffset.xy + VPOSOffset.zw;
 	}
-#			endif
+#			endif  // DEPTH
 
 	float2 refractionUV = GetDynamicResolutionAdjustedScreenPosition(refractionUvRaw);
 	float3 refractionColor = RefractionTex.Sample(RefractionSampler, refractionUV).xyz;
@@ -473,11 +473,11 @@ float3 GetWaterDiffuseColor(PS_INPUT input, float3 normal, float3 viewDirection,
 #			else
 	float refractionMul =
 		1 - pow(saturate((-distanceMul.x * FogParam.z + FogParam.z) / FogParam.w), FogNearColor.w);
-#			endif
+#			endif  // UNDERWATER
 	return lerp(refractionColor * WaterParams.w, refractionDiffuseColor, refractionMul);
 #		else
 	return lerp(ShallowColor.xyz, DeepColor.xyz, fresnel) * GetLdotN(normal);
-#		endif
+#		endif  // REFRACTIONS
 }
 
 float3 GetSunColor(float3 normal, float3 viewDirection)
@@ -495,13 +495,13 @@ float3 GetSunColor(float3 normal, float3 viewDirection)
 	float3 sunDirection = SunColor.xyz * SunDir.w;
 	float sunMul = pow(saturate(dot(normal, float3(-0.099, -0.099, 0.99))), ShallowColor.w);
 	return (reflectionMul * sunDirection) * DeepColor.w + WaterParams.z * (sunMul * sunDirection);
-#		endif
+#		endif  // defined(INTERIOR) || defined(UNDERWATER)
 }
-#	endif
+#	endif  // defined (FLOWMAP) && !defined(BLEND_NORMALS)
 
 #	if defined(WATER_BLENDING)
 #		include "WaterBlending/WaterBlending.hlsli"
-#	endif
+#	endif  // WATER_BLENDING
 
 #	if defined(LIGHT_LIMIT_FIX)
 #		include "LightLimitFix/LightLimitFix.hlsli"
@@ -540,8 +540,8 @@ PS_OUTPUT main(PS_INPUT input)
 	distanceMul = saturate(
 		planeMul * float4(length(depthAdjustedViewDirection).xx, abs(viewSurfaceAngle).xx) /
 		FogParam.z);
-#			endif
-#		endif
+#			endif  // defined(VERTEX_ALPHA_DEPTH)
+#		endif      // defined(DEPTH)
 
 #		if defined(UNDERWATER)
 	float4 depthControl = float4(0, 1, 1, 0);
@@ -551,7 +551,7 @@ PS_OUTPUT main(PS_INPUT input)
 	float4 depthControl = float4(0, 0, 1, 0);
 #		else
 	float4 depthControl = DepthControl * (distanceMul - 1) + 1;
-#		endif
+#		endif  // UNDERWATER
 
 	float3 normal = GetWaterNormal(input, distanceFactor, depthControl.z);
 
@@ -626,8 +626,8 @@ PS_OUTPUT main(PS_INPUT input)
 	float specularFraction = lerp(1, fresnel * depthControl.x, distanceFactor);
 	float3 finalColorPreFog = lerp(diffuseColor, specularColor, specularFraction) + sunColor * depthControl.w;
 	float3 finalColor = lerp(finalColorPreFog, input.FogParam.xyz, input.FogParam.w);
-#			endif
-#		endif
+#			endif  // UNDERWATER
+#		endif      // defined(SPECULAR) && (NUM_SPECULAR_LIGHTS != 0)
 
 	psout.Lighting = saturate(float4(finalColor * PosAdjust.w, isSpecular));
 #		if defined(WATER_BLENDING)
@@ -648,12 +648,12 @@ PS_OUTPUT main(PS_INPUT input)
 			psout.Lighting.xyz = lerp(psout.Lighting.xyz, background.xyz, blendFactor);
 			psout.Lighting.w = lerp(psout.Lighting.w, background.w, blendFactor);
 		}
-#				endif
+#				endif  // VERTEX_ALPHA_DEPTH
 	}
-#			endif
-#		endif
+#			endif  // DEPTH
+#		endif      // WATER_BLENDING
 
-#	endif
+#	endif  // defined(SPECULAR) && (NUM_SPECULAR_LIGHTS != 0)
 
 #	if defined(STENCIL)
 	float3 viewDirection = normalize(input.WorldPosition.xyz);
@@ -663,9 +663,9 @@ PS_OUTPUT main(PS_INPUT input)
 	psout.WaterMask = float4(0, 0, VdotN, 0);
 
 	psout.MotionVector = GetSSMotionVector(input.WorldPosition, input.PreviousWorldPosition);
-#	endif
+#	endif  // STENCIL
 
 	return psout;
 }
 
-#endif
+#endif  // VSHADER
