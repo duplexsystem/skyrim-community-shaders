@@ -167,8 +167,7 @@ namespace TAAReorder
 	// Wraps call at 0x132C827 (write_thunk_call). func() encompasses the
 	// conductor (Phase 2A) but NOT Phase 5 (TAA+DRS) — Phase 5 runs after us.
 	// We evaluate DLSS on the captured Phase 2A output and paste the center
-	// via CopySubresourceRegion. HAM artifacts are suppressed by blocking HAM
-	// rendering in HiddenAreaMeshHook when peripheryTAA is active.
+	// via CopySubresourceRegion onto the submit texture.
 	void BSImagespaceShaderHook::thunk(void* a_this, uint64_t a_param)
 	{
 		func(a_this, a_param);
@@ -282,18 +281,13 @@ namespace TAAReorder
 		func(manager, slot, desc);
 	}
 
-	// ─── Hidden area mesh render hook: suppress stencil overlay when peripheryTAA active ───
-	// HAM has two parts: (1) culling = performance optimization, (2) stencil overlay = cosmetic.
-	// The stencil overlay writes at render-res coordinates. After DRS upscaling to display-res,
-	// the stencil boundary misaligns with color, creating "frozen frame" artifacts.
-	// We suppress the stencil overlay (mode TBD) but keep culling for performance.
-	// SteamVR's own HAM handles final lens masking at submit time.
+	// ─── Hidden area mesh render hook: pass-through ───
+	// HAM renders normally. Previous "frozen frame" artifacts at the HAM boundary
+	// were caused by the depth upscaler's conservative blending (GatherRed + lerp)
+	// leaking depth=0 mask values into valid depth. Fixed in DepthUpscalePS.hlsl
+	// by switching to pure point sampling.
 	void HiddenAreaMeshHook::thunk(void* rendererState, uint8_t mode)
 	{
-		if (g_diagCounter == 0)
-			logger::info("[TAAReorder] HiddenAreaMeshHook: mode={} peripheryTAA={}", mode, ShouldReorderTAA());
-
-		// HAM fully enabled for RenderDoc capture to diagnose culling vs stencil overlay
 		func(rendererState, mode);
 	}
 

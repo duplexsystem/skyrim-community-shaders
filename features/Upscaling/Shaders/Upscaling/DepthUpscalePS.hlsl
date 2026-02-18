@@ -1,16 +1,17 @@
 /**
  * @file DepthUpscalePS.hlsl
- * @brief Conservative depth buffer upscaling for VR depth-based culling
+ * @brief Point-sampled depth buffer upscaling for VR depth-based culling
  *
  * When upscaling (FSR/DLSS) is active, the depth buffer is rendered at a lower
  * resolution than the display. Skyrim VR's depth-based culling (OBBOcclusionTesting)
  * reads from the depth buffer to determine object visibility, but with a mismatched
  * resolution, objects may be incorrectly culled (appearing to flicker in/out of view).
  *
- * This shader upscales the low-resolution depth buffer to full resolution using a
- * conservative approach: minimum depth from a 2x2 neighborhood blended with point-
- * sampled depth. Near the HMD hidden area mask (depth == 0 in reversed-Z), point
- * sampling is used exclusively to prevent mask bleed from bilinear filtering.
+ * This shader upscales the low-resolution depth buffer to full resolution using
+ * pure point sampling. Previous conservative blending (GatherRed + lerp toward
+ * min depth) caused HAM mask bleed: depth == 0 values from the hidden area mesh
+ * leaked into valid depth through the 2x2 neighborhood blend, creating artifacts
+ * at the mask boundary after DRS upscaling.
  *
  * Based on depth upscaling approach by vrnord
  * https://github.com/vrnord/skyrim-community-shaders-VR-DLSS
@@ -31,8 +32,6 @@ struct PS_OUTPUT
 
 Texture2D<float> DepthLowRes : register(t0);
 
-SamplerState LinearSampler : register(s0);
-
 cbuffer DepthUpscaleCB : register(b0)
 {
 	float2 SourceDim;    // Full texture dimensions (texels)
@@ -44,8 +43,8 @@ cbuffer DepthUpscaleCB : register(b0)
 /**
  * @brief Main pixel shader entry point
  *
- * Performs conservative depth upscaling by blending point-sampled depth
- * with minimum depth from a 2x2 neighborhood for safe culling.
+ * Pure point-sampled depth upscaling. Maps display-res pixel position to
+ * render-res texel and loads directly — no blending, no mask bleed.
  */
 PS_OUTPUT main(PS_INPUT input)
 {
@@ -61,27 +60,9 @@ PS_OUTPUT main(PS_INPUT input)
 	uv.x = clamp(uv.x, isRight ? halfScale : 0.0, isRight ? Scale.x : halfScale);
 	uv.y = clamp(uv.y, 0.0, Scale.y);
 
-	// Nearest texel coordinate for point sampling
+	// Nearest texel coordinate — pure point sampling, no blending
 	int2 texel = int2(floor(uv * SourceDim));
-
-	// GatherRed fetches the 2x2 texel quad around the sample point.
-	float4 depthQuad = DepthLowRes.GatherRed(LinearSampler, uv);
-	float minDepth = min(min(depthQuad.x, depthQuad.y), min(depthQuad.z, depthQuad.w));
-
-	// HMD hidden area mask: depth == 0 in reversed-Z.
-	// If ANY sample in the 2x2 quad is 0, we're at or near the mask boundary.
-	// Use point sampling only to avoid bilinear blending with mask pixels.
-	if (minDepth == 0.0) {
-		psout.Depth = DepthLowRes.Load(int3(texel, 0));
-		return psout;
-	}
-
-	// All four neighbors are valid depth. Blend point-sampled depth toward
-	// the conservative minimum for safe culling.
-	float pointDepth = DepthLowRes.Load(int3(texel, 0));
-
-	const float conservativeBias = 0.35;
-	psout.Depth = lerp(pointDepth, minDepth, conservativeBias);
+	psout.Depth = DepthLowRes.Load(int3(texel, 0));
 
 	return psout;
 }
