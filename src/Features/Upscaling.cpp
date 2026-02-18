@@ -506,6 +506,10 @@ void Upscaling::DataLoaded()
 void Upscaling::Load()
 {
 	*(uintptr_t*)&ptrD3D11CreateDeviceAndSwapChainUpscaling = SKSE::PatchIAT(hk_D3D11CreateDeviceAndSwapChainUpscaling, "d3d11.dll", "D3D11CreateDeviceAndSwapChain");
+
+	// Install depth/stencil registration hook early (before renderer creates targets)
+	if (globals::game::isVR)
+		TAAReorder::InitEarly();
 }
 
 struct BSImageSpace_Init_FXAA
@@ -968,8 +972,13 @@ void Upscaling::PreparePerEyeInputs(ID3D11Resource* colorSrc, ID3D11Resource* de
 		bool needsRecreate = !vrIntermediateColorIn[0] || !vrCropColorIn[0] || !vrIntermediateDepth[0] ||
 		                     !vrIntermediateColorOut[0] || !vrFinalOutput[0];
 		if (!needsRecreate) {
+			// Check format too — periphery TAA feeds R8G8B8A8 post-PP intermediate,
+			// while normal DLSS feeds R11G11B10 kMAIN. Must recreate on format change.
+			D3D11_TEXTURE2D_DESC srcDesc;
+			((ID3D11Texture2D*)colorSrc)->GetDesc(&srcDesc);
 			needsRecreate = (vrIntermediateColorIn[0]->desc.Width != eyeWidthIn ||
 			                 vrIntermediateColorIn[0]->desc.Height != eyeHeightIn ||
+			                 vrIntermediateColorIn[0]->desc.Format != srcDesc.Format ||
 			                 vrCropColorIn[0]->desc.Width != cropWidthIn ||
 			                 vrCropColorIn[0]->desc.Height != cropHeightIn ||
 			                 vrIntermediateDepth[0]->desc.Width != cropWidthIn ||
@@ -1081,8 +1090,11 @@ void Upscaling::PreparePerEyeInputs(ID3D11Resource* colorSrc, ID3D11Resource* de
 		// Non-viewport-scaling path: all textures at full per-eye dimensions
 		bool needsRecreate = !vrIntermediateColorIn[0] || !vrIntermediateColorOut[0];
 		if (!needsRecreate) {
+			D3D11_TEXTURE2D_DESC srcDesc;
+			((ID3D11Texture2D*)colorSrc)->GetDesc(&srcDesc);
 			needsRecreate = (vrIntermediateColorIn[0]->desc.Width != eyeWidthIn ||
 			                 vrIntermediateColorIn[0]->desc.Height != eyeHeightIn ||
+			                 vrIntermediateColorIn[0]->desc.Format != srcDesc.Format ||
 			                 vrIntermediateColorOut[0]->desc.Width != eyeWidthOut ||
 			                 vrIntermediateColorOut[0]->desc.Height != eyeHeightOut);
 		}
@@ -1854,7 +1866,7 @@ Upscaling::BlurResources Upscaling::GetBlurResources() const
 	return {};
 }
 
-void Upscaling::Upscale()
+void Upscaling::Upscale(ID3D11Texture2D* colorSourceOverride)
 {
 	auto upscaleMethod = GetUpscaleMethod();
 
@@ -1915,8 +1927,13 @@ void Upscaling::Upscale()
 	{
 		state->BeginPerfEvent("Upscaling");
 
+		// Use color source override if provided (e.g., post-PP intermediate for periphery TAA)
+		ID3D11Resource* colorSrc = colorSourceOverride
+			? static_cast<ID3D11Resource*>(colorSourceOverride)
+			: static_cast<ID3D11Resource*>(main.texture);
+
 		if (upscaleMethod == UpscaleMethod::kDLSS) {
-			streamline.Upscale(main.texture, reactiveMaskTexture->resource.get(), transparencyCompositionMaskTexture->resource.get(), motionVectorCopyTexture->resource.get());
+			streamline.Upscale(colorSrc, reactiveMaskTexture->resource.get(), transparencyCompositionMaskTexture->resource.get(), motionVectorCopyTexture->resource.get());
 		} else if (upscaleMethod == UpscaleMethod::kFSR) {
 			fidelityFX.Upscale(main.texture, reactiveMaskTexture->resource.get(), transparencyCompositionMaskTexture->resource.get(), motionVector.texture, settings.sharpnessFSR);
 		}
@@ -1951,14 +1968,13 @@ void Upscaling::UpscaleDepth(bool depthOnly)
 		auto& depthCopy = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN_COPY];
 
 		auto screenSize = globals::state->screenSize;
-		float2 renderSize = screenSize * resolutionScale;
 
 		// Update constant buffer
 		DepthUpscaleCB cbData;
-		cbData.SourceResolution = renderSize;
-		cbData.TargetResolution = screenSize;
-		cbData.ResolutionScale = renderSize / screenSize;
-		cbData.TexelSize = float2(1.0f / renderSize.x, 1.0f / renderSize.y);
+		cbData.SourceDim = screenSize;
+		cbData.InvSourceDim = float2(1.0f / screenSize.x, 1.0f / screenSize.y);
+		cbData.Scale = resolutionScale;
+		cbData.Pad = { 0, 0 };
 
 		depthUpscaleCB->Update(cbData);
 		auto bufferArray = depthUpscaleCB->CB();
@@ -2173,99 +2189,46 @@ void Upscaling::Main_PostProcessing::thunk(RE::ImageSpaceManager* a_this, uint32
 	// Increment diagnostic counter (rate-limits TAAReorder logging)
 	if (TAAReorder::g_initialized) {
 		TAAReorder::g_diagCounter = (TAAReorder::g_diagCounter + 1) % TAAReorder::DIAG_INTERVAL;
+		if (TAAReorder::g_diagCounter == 0) {
+			TAAReorder::g_frameSeqCounter = 0;
+			logger::info("[SEQ] Main_PostProcessing START seq={}", TAAReorder::g_frameSeqCounter++);
+		}
 	}
 
 	bool peripheryTAA = TAAReorder::ShouldReorderTAA();
 
 	if (peripheryTAA) {
-		// ─── In-conductor DLSS with periphery TAA (PureDark approach) ───
-		//
-		// Single func() call with TAA enabled. Inside the conductor:
-		//   1. PP passes run on render-res kMAIN (bloom, DOF, etc.)
-		//   2. TAA pass (dst=0x72) runs → upscales to display-res with temporal AA
-		//   3. ExecutePassHook inserts DLSS right after TAA:
-		//      a. Copies post-PP content to kMAIN (so DLSS matches TAA's PP level)
-		//      b. Runs DLSS on center sub-region → writes to kMAIN
-		//      c. Pastes DLSS center into the TAA output RT (in-place)
-		//   4. Conductor's remaining passes process the composite uniformly
-		//
-		// Result: one func() call, no double PP, minimal overhead.
-		// Both DLSS center and TAA periphery have identical post-processing.
+		// ─── Periphery TAA with post-conductor DLSS (PureDark's approach) ───
+		// func() with TAA enabled → conductor runs all passes unimpeded:
+		//   Phase 2A: ExecutePassHook captures post-PP intermediate to g_postPPCopy
+		//   Phase 5: TAA + DRS → submit texture
+		// After conductor: ConductorCallHook evaluates DLSS on g_postPPCopy,
+		// then pastes DLSS center onto submit texture
 
 		auto imageSpaceManager = RE::ImageSpaceManager::GetSingleton();
 		GET_INSTANCE_MEMBER(BSImagespaceShaderISTemporalAA, imageSpaceManager);
-		auto context = globals::d3d::context;
-		auto renderer = RE::BSGraphics::Renderer::GetSingleton();
 
-		// Ensure pre-TAA copy texture exists (full stereo kMAIN size)
-		if (!upscaling.vrPreTAACopy) {
-			auto& mainTexture = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
-			D3D11_TEXTURE2D_DESC desc;
-			mainTexture.texture->GetDesc(&desc);
-			desc.BindFlags = 0;
-			desc.MiscFlags = 0;
-			globals::d3d::device->CreateTexture2D(&desc, nullptr, upscaling.vrPreTAACopy.put());
-			if (upscaling.vrPreTAACopy)
-				Util::SetResourceName(upscaling.vrPreTAACopy.get(), "Upscale_PreTAACopy");
-		}
-
-		// Enable bUseTAA:Display (CS force-disables it, but the TAA pass checks it)
-		auto taaINI = RE::GetINISetting("bUseTAA:Display");
-		bool savedTAAINI = taaINI->data.b;
-		taaINI->data.b = true;
-
-		// Enable TAA for conductor
-		BSImagespaceShaderISTemporalAA->taaEnabled = true;
-
-		// Save raw kMAIN — DLSS will restore from this after writing to kMAIN inside the hook
-		{
-			auto& mainTexture = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
-			context->CopyResource(upscaling.vrPreTAACopy.get(), mainTexture.texture);
-		}
-
-		// Full UpscaleDepth (depth + RT upscaling) before TAA.
-		// The RT upscaling writes stencil 0x00 to MAIN depth buffer at display-res,
-		// which tells TAA that all pixels are valid (eliminating the DRS viewport mask).
-		// Now compiled with VR define for correct per-eye stereo UV mapping.
-		upscaling.UpscaleDepth();
+		// Reset per-frame flags
+		TAAReorder::g_postPPReady = false;
+		TAAReorder::g_dlssReady = false;
+		TAAReorder::g_dlssPasteComplete = false;
+		TAAReorder::g_phase5Complete = false;
+		TAAReorder::g_bsHookCallCount = 0;
 
 		if (TAAReorder::g_diagCounter == 0)
-			logger::info("[TAAReorder] Single func(): taaEnabled=true, DRS active, UpscaleDepth (VR stereo UV fix) pre-TAA");
+			logger::info("[TAAReorder] peripheryTAA: running func() with TAA enabled...");
 
-		// Single func() call — conductor runs PP + TAA.
-		// ExecutePassHook captures TAA output and PP output refs.
-		TAAReorder::g_hookPhase = TAAReorder::HookPhase::FirstFunc;
-		TAAReorder::g_phase1PassCount = 0;
-
+		// func() with TAA ENABLED — DLSS eval + paste in ConductorCallHook (post-conductor)
+		BSImagespaceShaderISTemporalAA->taaEnabled = true;
 		func(a_this, a3, a_target, a_4, a_5);
 
-		TAAReorder::g_hookPhase = TAAReorder::HookPhase::Inactive;
+		// Lock DRS + update camera (after conductor completes)
+		auto& runtimeData = globals::game::graphicsState->GetRuntimeData();
+		runtimeData.dynamicResolutionLock = 1;
+		UpdateCameraData();
 
-		// Restore TAA state
-		taaINI->data.b = savedTAAINI;
+		// Disable TAA for remainder of frame
 		BSImagespaceShaderISTemporalAA->taaEnabled = false;
-
-		// Post-func: DLSS + composite.
-		// CompositeAfterConductor: blits PP→kMAIN, runs DLSS, saves output for SubmitHook.
-		TAAReorder::CompositeAfterConductor();
-
-		// Cleanup any leaked refs (shouldn't happen if CompositeAfterConductor ran correctly)
-		if (TAAReorder::g_capturedTAARTV) {
-			TAAReorder::g_capturedTAARTV->Release();
-			TAAReorder::g_capturedTAARTV = nullptr;
-		}
-		if (TAAReorder::g_capturedTAAOutput) {
-			TAAReorder::g_capturedTAAOutput->Release();
-			TAAReorder::g_capturedTAAOutput = nullptr;
-		}
-		if (TAAReorder::g_capturedPPOutput) {
-			TAAReorder::g_capturedPPOutput->Release();
-			TAAReorder::g_capturedPPOutput = nullptr;
-		}
-
-		if (TAAReorder::g_diagCounter == 0)
-			logger::info("[TAAReorder] Frame complete: {} conductor passes, post-conductor DLSS composite",
-				TAAReorder::g_phase1PassCount);
 	} else {
 		// ─── Normal flow (no periphery TAA) ───
 		if (upscaleMethod != UpscaleMethod::kNONE && upscaleMethod != UpscaleMethod::kTAA)
@@ -2278,6 +2241,9 @@ void Upscaling::Main_PostProcessing::thunk(RE::ImageSpaceManager* a_this, uint32
 		GET_INSTANCE_MEMBER(BSImagespaceShaderISTemporalAA, imageSpaceManager);
 
 		BSImagespaceShaderISTemporalAA->taaEnabled = (upscaleMethod == UpscaleMethod::kTAA);
+
+		if (TAAReorder::g_diagCounter == 0 && TAAReorder::g_initialized)
+			logger::info("[DIAG] Normal DLSS flow: taaEnabled={}, running func()...", BSImagespaceShaderISTemporalAA->taaEnabled);
 
 		func(a_this, a3, a_target, a_4, a_5);
 

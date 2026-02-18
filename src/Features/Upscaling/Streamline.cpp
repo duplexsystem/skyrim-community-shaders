@@ -319,6 +319,20 @@ void Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport, uint32_t eye
 		}
 
 		sl::matrixFullInvert(slConstants.prevClipToClip, slConstants.clipToPrevClip);
+
+		// Per-eye diagnostic logging for temporal quality investigation
+		if (TAAReorder::g_diagCounter == 0 && vpScale < 1.0f) {
+			auto& ctp = slConstants.clipToPrevClip;
+			logger::info("[TAAReorder] Eye {} clipToPrevClip diag=({:.6f},{:.6f},{:.6f},{:.6f})",
+				eyeIndex, ctp[0].x, ctp[1].y, ctp[2].z, ctp[3].w);
+			logger::info("[TAAReorder] Eye {} prevVP diag=({:.6f},{:.6f},{:.6f},{:.6f})",
+				eyeIndex, prevViewProjSL[0].x, prevViewProjSL[1].y, prevViewProjSL[2].z, prevViewProjSL[3].w);
+			logger::info("[TAAReorder] Eye {} currVP diag=({:.6f},{:.6f},{:.6f},{:.6f})",
+				eyeIndex, currViewProjSL[0].x, currViewProjSL[1].y, currViewProjSL[2].z, currViewProjSL[3].w);
+			logger::info("[TAAReorder] Eye {} cameraPos=({:.2f},{:.2f},{:.2f}) fov={:.4f}",
+				eyeIndex, slConstants.cameraPos.x, slConstants.cameraPos.y, slConstants.cameraPos.z,
+				slConstants.cameraFOV);
+		}
 	} else {
 		recalculateCameraMatrices(slConstants);
 	}
@@ -341,6 +355,13 @@ void Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport, uint32_t eye
 	} else {
 		slConstants.mvecScale = { 1.0f, 1.0f };
 	}
+	// Log mvecScale after assignment (was previously logged before assignment, showing uninitialized values)
+	if (globals::game::isVR && TAAReorder::g_diagCounter == 0 && globals::features::upscaling.settings.vrDlssViewportScale < 1.0f) {
+		logger::info("[TAAReorder] Eye {} mvecScale=({:.4f},{:.4f}) jitter=({:.4f},{:.4f})",
+			eyeIndex, slConstants.mvecScale.x, slConstants.mvecScale.y,
+			slConstants.jitterOffset.x, slConstants.jitterOffset.y);
+	}
+
 	slConstants.motionVectors3D = sl::Boolean::eFalse;
 	slConstants.motionVectorsInvalidValue = FLT_MIN;
 	slConstants.orthographicProjection = sl::Boolean::eFalse;
@@ -565,7 +586,6 @@ void Streamline::Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_r
 
 			if (viewportScaling) {
 				// Pre-fill composition target with bilinear upscale of full render-res eye.
-				// TAA periphery is injected later at the display RT level (not here).
 				// DLSS output is pasted on top in FinalizePerEyeOutputs.
 				upscaling.FillPeriphery(i, eyeWidthIn, eyeHeightIn, eyeWidthOut, eyeHeightOut);
 			}
