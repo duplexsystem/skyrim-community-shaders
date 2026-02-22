@@ -178,6 +178,69 @@ namespace Util
 		}
 	}
 
+	// --- Reusable ConfirmationPopup ---
+
+	void ConfirmationPopup::Request()
+	{
+		if (dontAskAgainPersist && *dontAskAgainPersist) {
+			confirmed = true;
+			return;
+		}
+		show = true;
+		confirmed = false;
+		dontAskCheckbox = false;
+	}
+
+	bool ConfirmationPopup::Draw()
+	{
+		if (confirmed) {
+			confirmed = false;
+			return true;
+		}
+		if (!show)
+			return false;
+
+		ImGui::OpenPopup(title.c_str());
+		ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+		ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+
+		bool result = false;
+		if (ImGui::BeginPopupModal(title.c_str(), &show, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui::TextWrapped("%s", message.c_str());
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+
+			if (showDontAskAgain)
+				ImGui::Checkbox("Don't ask me again", &dontAskCheckbox);
+
+			constexpr float buttonWidth = ThemeManager::Constants::POPUP_BUTTON_WIDTH;
+			const float spacing = ImGui::GetStyle().ItemSpacing.x;
+			const float totalWidth = buttonWidth * 2 + spacing;
+			const float offset = (ImGui::GetWindowWidth() - totalWidth) * 0.5f;
+			if (offset > 0)
+				ImGui::SetCursorPosX(offset);
+
+			if (ImGui::Button(confirmLabel.c_str(), ImVec2(buttonWidth, 0))) {
+				if (showDontAskAgain && dontAskCheckbox && dontAskAgainPersist)
+					*dontAskAgainPersist = true;
+				result = true;
+				show = false;
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::SameLine();
+
+			if (ImGui::Button(cancelLabel.c_str(), ImVec2(buttonWidth, 0))) {
+				show = false;
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::EndPopup();
+		}
+		return result;
+	}
+
 	bool PercentageSlider(const char* label, float* data, float lb, float ub, const char* format)
 	{
 		float percentageData = (*data) * 1e2f;
@@ -307,6 +370,16 @@ namespace Util
 		if (m_pushedStyles > 0) {
 			ImGui::PopStyleColor(m_pushedStyles);
 		}
+	}
+
+	StyledButtonWrapper ErrorButtonStyle()
+	{
+		constexpr float kHoverBrighten = 0.2f;
+		constexpr float kActiveBrighten = 0.3f;
+		auto color = Menu::GetSingleton()->GetTheme().StatusPalette.Error;
+		auto hover = ImVec4(std::min(color.x + kHoverBrighten, 1.0f), std::min(color.y + kHoverBrighten, 1.0f), std::min(color.z + kHoverBrighten, 1.0f), color.w);
+		auto active = ImVec4(std::min(color.x + kActiveBrighten, 1.0f), std::min(color.y + kActiveBrighten, 1.0f), std::min(color.z + kActiveBrighten, 1.0f), color.w);
+		return StyledButtonWrapper(color, hover, active);
 	}
 
 	// SectionWrapper implementation
@@ -795,6 +868,59 @@ namespace Util
 		ImVec2 handleStart = ImVec2(center.x + radius * 0.81f, center.y + radius * 0.81f);
 		ImVec2 handleEnd = ImVec2(handleStart.x + size * 0.29f, handleStart.y + size * 0.29f);
 		drawList->AddLine(handleStart, handleEnd, placeholderColor, 2.1f);
+	}
+
+	namespace detail
+	{
+		struct ComboSearchState
+		{
+			char buffer[256] = {};
+			bool needsFocus = true;
+		};
+
+		static std::unordered_map<std::string, ComboSearchState>& GetComboSearchStates()
+		{
+			static std::unordered_map<std::string, ComboSearchState> states;
+			return states;
+		}
+	}
+
+	std::string DrawComboSearchInput(const char* id)
+	{
+		auto& state = detail::GetComboSearchStates()[id];
+
+		if (state.needsFocus) {
+			ImGui::SetKeyboardFocusHere();
+			state.needsFocus = false;
+		}
+
+		constexpr float iconSize = ThemeManager::Constants::COMBO_SEARCH_ICON_SIZE;
+		constexpr float iconAlpha = ThemeManager::Constants::COMBO_SEARCH_ICON_ALPHA;
+		constexpr float iconOffsetX = ThemeManager::Constants::COMBO_SEARCH_ICON_OFFSET_X;
+		constexpr float paddingLeft = ThemeManager::Constants::COMBO_SEARCH_PADDING_LEFT;
+
+		char widgetId[128];
+		snprintf(widgetId, sizeof(widgetId), "##%s_search", id);
+
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(paddingLeft, ImGui::GetStyle().FramePadding.y));
+		ImGui::InputTextWithHint(widgetId, "Search...", state.buffer, IM_ARRAYSIZE(state.buffer));
+		ImGui::PopStyleVar();
+
+		ImVec2 iconPos = ImVec2(
+			ImGui::GetItemRectMin().x + iconOffsetX,
+			ImGui::GetItemRectMin().y + (ImGui::GetItemRectSize().y - iconSize) * 0.5f);
+		DrawSearchIcon(iconPos, iconSize, iconAlpha);
+
+		ImGui::Separator();
+
+		return state.buffer;
+	}
+
+	void ClearComboSearch(const char* id)
+	{
+		auto& state = detail::GetComboSearchStates()[id];
+		state.buffer[0] = '\0';
+		state.needsFocus = true;
 	}
 
 	void DrawFeatureSearchBar(std::string& searchString, float availableWidth)

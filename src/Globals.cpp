@@ -30,6 +30,7 @@
 #include "Features/Upscaling.h"
 #include "Features/VR.h"
 #include "Features/VolumetricLighting.h"
+#include "Features/VolumetricShadows.h"
 #include "Features/WaterEffects.h"
 #include "Features/WeatherEditor.h"
 #include "Features/WetnessEffects.h"
@@ -52,6 +53,7 @@ namespace globals
 	{
 		CloudShadows cloudShadows{};
 		DynamicCubemaps dynamicCubemaps{};
+		VolumetricShadows volumetricShadows{};
 		ExtendedMaterials extendedMaterials{};
 		GrassCollision grassCollision{};
 		GrassLighting grassLighting{};
@@ -106,7 +108,8 @@ namespace globals
 		RE::BSUtilityShader* utilityShader = nullptr;
 		RE::Sky* sky = nullptr;
 		RE::UI* ui = nullptr;
-		RE::Main* main = nullptr;
+		RE::Calendar* calendar = nullptr;
+		std::atomic<bool> quitGame{ false };
 
 		RE::BSGraphics::PixelShader** currentPixelShader = nullptr;
 		RE::BSGraphics::VertexShader** currentVertexShader = nullptr;
@@ -173,6 +176,7 @@ namespace globals
 			stateUpdateFlags = GET_INSTANCE_MEMBER_PTR(stateUpdateFlags, shadowState);
 
 			ui = RE::UI::GetSingleton();
+			calendar = RE::Calendar::GetSingleton();
 			perFrame = { REL::RelocationID(524768, 411384) };
 
 			currentAccumulator = { REL::RelocationID(527650, 414600) };
@@ -198,7 +202,6 @@ namespace globals
 	void OnDataLoaded()
 	{
 		using namespace game;
-		main = RE::Main::GetSingleton();
 		sky = RE::Sky::GetSingleton();
 		utilityShader = RE::BSUtilityShader::GetSingleton();
 
@@ -210,9 +213,9 @@ namespace globals
 
 	void OnGameWindowClose()
 	{
-		if (shaderCache) {
+		game::quitGame = true;
+		if (shaderCache)
 			shaderCache->StopCompilation();
-		}
 	}
 
 	/**
