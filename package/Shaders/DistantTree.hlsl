@@ -203,7 +203,10 @@ PS_OUTPUT main(PS_INPUT input)
 
 	float alpha = TexDiffuse.SampleBias(SampDiffuse, input.TexCoord.xy, SharedData::MipBias).w;
 
-	if ((alpha - AlphaTestRefRS) < 0) {
+	// VRS Fix: Use fixed low alpha threshold to prevent white outline artifacts
+	// caused by VRS coarse shading at alpha edges.
+	const float vrsFixedAlphaThreshold = 0.1;
+	if ((alpha - vrsFixedAlphaThreshold) < 0) {
 		discard;
 	}
 
@@ -213,7 +216,10 @@ PS_OUTPUT main(PS_INPUT input)
 	float4 baseColor = TexDiffuse.SampleBias(SampDiffuse, input.TexCoord.xy, SharedData::MipBias);
 	baseColor.xyz = Color::Diffuse(baseColor.xyz);
 
-	if ((baseColor.w - AlphaTestRefRS) < 0) {
+	// VRS Fix: Use fixed low alpha threshold to prevent white outline artifacts
+	// caused by VRS coarse shading at alpha edges.
+	const float vrsFixedAlphaThreshold = 0.1;
+	if ((baseColor.w - vrsFixedAlphaThreshold) < 0) {
 		discard;
 	}
 
